@@ -15,11 +15,10 @@
 #define UP 1
 #define DOWN 2
 #define RIGHT 3
-
 #define PANEL_COUNT 4
-#define SENSORS_PER_PANEL_COUNT 2
+const unsigned int PANEL_TO_JOY_BUTTON_MAP[] = { BTN_WEST, BTN_NORTH, BTN_SOUTH, BTN_EAST };
 
-int THRESHOLD = 50;
+#define SENSORS_PER_PANEL_COUNT 2
 
 struct sensor {
     unsigned int value;
@@ -30,8 +29,9 @@ struct panel {
 };
 
 struct pad_state {
-    struct panel panel[PANEL_COUNT];
+    struct panel panels[PANEL_COUNT];
 };
+
 
 int create_uinput_device(struct libevdev_uinput **uidev) {
     struct libevdev *dev = libevdev_new();
@@ -57,7 +57,7 @@ int create_serial_device(const char* port) {
     }
 
     /* set serial port to low_latency mode */
-    serial_struct serial;
+    struct serial_struct serial;
     ioctl(fd, TIOCGSERIAL, &serial);
     serial.flags |= ASYNC_LOW_LATENCY;
     ioctl(fd, TIOCSSERIAL, &serial);
@@ -103,6 +103,7 @@ int read_serial_byte(int fd) {
 }
 
 bool is_pressed(const struct panel *panel) {
+    int THRESHOLD = 50;
     return panel->sensors[0].value > THRESHOLD || panel->sensors[1].value > THRESHOLD;
 }
 
@@ -111,33 +112,22 @@ void process_data(int serial_fd, struct pad_state *pad_state, const struct libev
     while (read_serial_byte(serial_fd) != 255) {}
     
     struct panel panels[PANEL_COUNT];
-    panels[LEFT].sensors[0].value = read_serial_byte(serial_fd);
-    panels[LEFT].sensors[1].value = read_serial_byte(serial_fd);
-    panels[DOWN].sensors[0].value = read_serial_byte(serial_fd);
-    panels[DOWN].sensors[1].value = read_serial_byte(serial_fd);
-    panels[UP].sensors[0].value = read_serial_byte(serial_fd);
-    panels[UP].sensors[1].value = read_serial_byte(serial_fd);
-    panels[RIGHT].sensors[0].value = read_serial_byte(serial_fd);
-    panels[RIGHT].sensors[1].value = read_serial_byte(serial_fd);
 
-    if (is_pressed(&pad_state->panel[LEFT]) != is_pressed(&panels[LEFT])) {    
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_WEST, is_pressed(&panels[LEFT]) ? 1 : 0);
+    for (int i = 0; i < PANEL_COUNT; i++) {
+        for (int j = 0; i < SENSORS_PER_PANEL_COUNT; j++) {
+            panels[i].sensors[j].value = read_serial_byte(serial_fd);
+        }
     }
 
-    if (is_pressed(&pad_state->panel[DOWN]) != is_pressed(&panels[DOWN])) {    
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_SOUTH, is_pressed(&panels[DOWN]) ? 1 : 0);
-    }
-
-    if (is_pressed(&pad_state->panel[UP]) != is_pressed(&panels[UP])) {    
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_NORTH, is_pressed(&panels[UP]) ? 1 : 0);
-    }
-
-    if (is_pressed(&pad_state->panel[RIGHT]) != is_pressed(&panels[RIGHT])) {    
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_EAST, is_pressed(&panels[RIGHT]) ? 1 : 0);
+    for (int i = 0; i < PANEL_COUNT; i++) {
+        bool is_new_state_pressed = is_pressed(&panels[i]);
+        if (is_pressed(&pad_state->panels[i]) != is_new_state_pressed) {    
+            libevdev_uinput_write_event(uidev, EV_KEY, PANEL_TO_JOY_BUTTON_MAP[i], is_new_state_pressed ? 1 : 0);
+        }
     }
 
     libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-    memcpy(&pad_state->panel, panels, sizeof (panels));
+    memcpy(&pad_state->panels, panels, sizeof (panels));
 }
 
 int main(int argc, char **argv)
