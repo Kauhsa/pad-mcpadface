@@ -9,6 +9,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <errno.h>
+#include <linux/serial.h>
 
 #define LEFT 0
 #define UP 1
@@ -54,6 +55,12 @@ int create_serial_device(const char* port) {
     if (fd < 0) {
        return fd; // error
     }
+
+    /* set serial port to low_latency mode */
+    serial_struct serial;
+    ioctl(fd, TIOCGSERIAL, &serial);
+    serial.flags |= ASYNC_LOW_LATENCY;
+    ioctl(fd, TIOCSSERIAL, &serial);
 
     struct termios SerialPortSettings;
 
