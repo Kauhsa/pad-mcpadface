@@ -10,32 +10,36 @@
 #include <unistd.h>
 #include <errno.h>
 
-// sensors
-#define UP_1 0
-#define UP_2 1
-#define RIGHT_1 2
-#define RIGHT_2 3
-#define DOWN_1 4
-#define DOWN_2 5
-#define LEFT_1 6
-#define LEFT_2 7
+#define LEFT 0
+#define UP 1
+#define DOWN 2
+#define RIGHT 3
 
-#define SENSORS_LEN 8
+#define PANEL_COUNT 4
+#define SENSORS_PER_PANEL_COUNT 2
 
 int THRESHOLD = 50;
 
+struct sensor {
+    unsigned int value;
+};
+
+struct panel {
+    struct sensor sensors[SENSORS_PER_PANEL_COUNT];
+};
+
 struct pad_state {
-    int current_value[SENSORS_LEN];
+    struct panel panel[PANEL_COUNT];
 };
 
 int create_uinput_device(struct libevdev_uinput **uidev) {
     struct libevdev *dev = libevdev_new();
     libevdev_set_name(dev, "Pad McPadFace");
     libevdev_enable_event_type(dev, EV_KEY);
-    libevdev_enable_event_code(dev, EV_KEY, BTN_NORTH, NULL);
-    libevdev_enable_event_code(dev, EV_KEY, BTN_SOUTH, NULL);
-    libevdev_enable_event_code(dev, EV_KEY, BTN_EAST, NULL);
     libevdev_enable_event_code(dev, EV_KEY, BTN_WEST, NULL);
+    libevdev_enable_event_code(dev, EV_KEY, BTN_SOUTH, NULL);
+    libevdev_enable_event_code(dev, EV_KEY, BTN_NORTH, NULL);
+    libevdev_enable_event_code(dev, EV_KEY, BTN_EAST, NULL);
 
     return libevdev_uinput_create_from_device(
         dev,
@@ -44,7 +48,7 @@ int create_uinput_device(struct libevdev_uinput **uidev) {
     );
 }
 
-int create_serial_device(char* port) {
+int create_serial_device(const char* port) {
     int fd = open(port, O_RDONLY | O_NOCTTY);
 
     if (fd < 0) {
@@ -91,56 +95,48 @@ int read_serial_byte(int fd) {
     return read_buffer;
 }
 
-bool is_pressed(int sensor_value_1, int sensor_value_2) {
-    return sensor_value_1 > THRESHOLD || sensor_value_2 > THRESHOLD;
+bool is_pressed(const struct panel *panel) {
+    return panel->sensors[0].value > THRESHOLD || panel->sensors[1].value > THRESHOLD;
 }
 
-void process_data(int serial_fd, struct pad_state *pad_state, struct libevdev_uinput *uidev) {
+void process_data(int serial_fd, struct pad_state *pad_state, const struct libevdev_uinput *uidev) {
     // wait for the message start byte
     while (read_serial_byte(serial_fd) != 255) {}
     
-    int new_values[SENSORS_LEN];
-    new_values[UP_1] = read_serial_byte(serial_fd);
-    new_values[UP_2] = read_serial_byte(serial_fd);
-    new_values[RIGHT_1] = read_serial_byte(serial_fd);
-    new_values[RIGHT_2] = read_serial_byte(serial_fd);
-    new_values[DOWN_1] = read_serial_byte(serial_fd);
-    new_values[DOWN_2] = read_serial_byte(serial_fd);
-    new_values[LEFT_1] = read_serial_byte(serial_fd);
-    new_values[LEFT_2] = read_serial_byte(serial_fd);
+    struct panel panels[PANEL_COUNT];
+    panels[LEFT].sensors[0].value = read_serial_byte(serial_fd);
+    panels[LEFT].sensors[1].value = read_serial_byte(serial_fd);
+    panels[DOWN].sensors[0].value = read_serial_byte(serial_fd);
+    panels[DOWN].sensors[1].value = read_serial_byte(serial_fd);
+    panels[UP].sensors[0].value = read_serial_byte(serial_fd);
+    panels[UP].sensors[1].value = read_serial_byte(serial_fd);
+    panels[RIGHT].sensors[0].value = read_serial_byte(serial_fd);
+    panels[RIGHT].sensors[1].value = read_serial_byte(serial_fd);
 
-    int up_pressed = is_pressed(new_values[UP_1], new_values[UP_2]);
-    int down_pressed = is_pressed(new_values[DOWN_1], new_values[DOWN_2]);
-    int left_pressed = is_pressed(new_values[LEFT_1], new_values[LEFT_2]);
-    int right_pressed = is_pressed(new_values[RIGHT_1], new_values[RIGHT_2]);
-
-    if (up_pressed != is_pressed(pad_state->current_value[UP_1], pad_state->current_value[UP_2])) {    
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_NORTH, up_pressed ? 1 : 0);
+    if (is_pressed(&pad_state->panel[LEFT]) != is_pressed(&panels[LEFT])) {    
+        libevdev_uinput_write_event(uidev, EV_KEY, BTN_WEST, is_pressed(&panels[LEFT]) ? 1 : 0);
     }
 
-    if (right_pressed != is_pressed(pad_state->current_value[RIGHT_1], pad_state->current_value[RIGHT_2])) {
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_EAST, right_pressed ? 1 : 0);
+    if (is_pressed(&pad_state->panel[DOWN]) != is_pressed(&panels[DOWN])) {    
+        libevdev_uinput_write_event(uidev, EV_KEY, BTN_SOUTH, is_pressed(&panels[DOWN]) ? 1 : 0);
     }
 
-    if (down_pressed != is_pressed(pad_state->current_value[DOWN_1], pad_state->current_value[DOWN_2])) {
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_SOUTH, down_pressed ? 1 : 0);
+    if (is_pressed(&pad_state->panel[UP]) != is_pressed(&panels[UP])) {    
+        libevdev_uinput_write_event(uidev, EV_KEY, BTN_NORTH, is_pressed(&panels[UP]) ? 1 : 0);
     }
 
-    if (left_pressed != is_pressed(pad_state->current_value[LEFT_1], pad_state->current_value[LEFT_2])) {
-        libevdev_uinput_write_event(uidev, EV_KEY, BTN_WEST, left_pressed ? 1 : 0);
+    if (is_pressed(&pad_state->panel[RIGHT]) != is_pressed(&panels[RIGHT])) {    
+        libevdev_uinput_write_event(uidev, EV_KEY, BTN_EAST, is_pressed(&panels[RIGHT]) ? 1 : 0);
     }
 
     libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-    memcpy(&pad_state->current_value, new_values, sizeof (new_values));
+    memcpy(&pad_state->panel, panels, sizeof (panels));
 }
 
 int main(int argc, char **argv)
 {
     struct libevdev_uinput *uidev;
-
-    struct pad_state pad_state = {
-        .current_value = {0, 0, 0, 0, 0, 0, 0, 0}
-    };
+    struct pad_state pad_state = { 0 }; // all bytes inside to a 0
 
     int err = create_uinput_device(&uidev);
     int serial_fd = create_serial_device("/dev/ttyACM0");
